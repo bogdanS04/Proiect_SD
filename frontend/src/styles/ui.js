@@ -1,0 +1,12 @@
+export const page = { fontFamily: 'system-ui, sans-serif', margin: 24, maxWidth: 1100 };
+export const card = { border: '1px solid #ddd', padding: 16, borderRadius: 12, marginBottom: 16 };
+export const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 };
+export const rowHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between' };
+export const inp = { width: '100%', padding: 10, margin: '6px 0', border: '1px solid #ccc', borderRadius: 8 };
+export const inpSmall = { ...inp, maxWidth: 220 };
+export const btn = { padding: '8px 14px', borderRadius: 8, border: '1px solid #111', background: '#111', color: '#fff', cursor: 'pointer' };
+export const btnSecondary = { ...btn, background: '#fff', color: '#111' };
+export const btnSmall = { ...btn, padding: '6px 10px' };
+export const btnSmallDanger = { ...btnSmall, background: '#a00', borderColor: '#a00' };
+export const table = { width:'100%', borderCollapse:'collapse' };
+export const pre = { background:'#111', color:'#0f0', padding:12, borderRadius:8, whiteSpace:'pre-wrap', wordBreak:'break-word', overflow:'auto' };

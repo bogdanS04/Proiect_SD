@@ -1,0 +1,13 @@
+{
+  "name": "load-balancer",
+  "version": "1.0.0",
+  "description": "RabbitMQ consumer that distributes device readings to monitoring replicas",
+  "type": "module",
+  "main": "balancer.js",
+  "scripts": {
+    "start": "node balancer.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3"
+  }
+}

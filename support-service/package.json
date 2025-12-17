@@ -1,0 +1,16 @@
+{
+  "name": "support-service",
+  "version": "1.0.0",
+  "description": "Customer support microservice with rule-based and AI-driven replies",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
+  }
+}

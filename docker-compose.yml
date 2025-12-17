@@ -1,0 +1,305 @@
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - --log.level=INFO
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      # - --api.insecure=true   # (optional, doar pentru debug local)
+    ports:
+      - "80:80"
+      # - "8080:8080"          # (optional) dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      # Middleware ForwardAuth (intern)
+      - "traefik.http.middlewares.authforward.forwardauth.address=http://auth-service:8080/internal/verify"
+      - "traefik.http.middlewares.authforward.forwardauth.authResponseHeaders=X-User-Id,X-User-Role,X-Username,Authorization"
+
+  web:
+    build: ./frontend
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`app.localhost`)"
+      - "traefik.http.routers.web.entrypoints=web"
+      - "traefik.http.routers.web.priority=1"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+
+  userdb:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: userdb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    networks: [proxy]
+
+  authdb:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: password
+    networks: [proxy]
+
+  devicedb:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: devicedb
+      POSTGRES_USER: device
+      POSTGRES_PASSWORD: password
+    networks: [proxy]
+
+  monitoringdb:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: monitoring
+      POSTGRES_USER: monitoring
+      POSTGRES_PASSWORD: monitoring
+    networks: [proxy]
+
+  user-service:
+    build: ./user-service
+    depends_on: [rabbitmq, userdb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://userdb:5432/userdb
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8081
+      INTERNAL_SECRET: 15699be4afbbbaec6e6d1cd1ad497a4510d2434f1ed4e57f4e2a731ebd3af296
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.users.rule=Host(`app.localhost`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users.entrypoints=web"
+      - "traefik.http.routers.users.priority=100"
+      - "traefik.http.routers.users.middlewares=authforward@docker"
+      - "traefik.http.services.users.loadbalancer.server.port=8081"
+
+  auth-service:
+    build: ./auth-service
+    depends_on: [rabbitmq, authdb, user-service]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://authdb:5432/authdb
+      SPRING_DATASOURCE_USERNAME: auth
+      SPRING_DATASOURCE_PASSWORD: password
+      JWT_SECRET: SgNfKM69SjEaN9c3dC4sLfCPff0Uf5Mt1zj7nyj6ZD/Lj0cBdOhrTtdLUgDgBYOLstR8yueGg0IG3PGbi8jfvQ==
+      INTERNAL_SECRET: 15699be4afbbbaec6e6d1cd1ad497a4510d2434f1ed4e57f4e2a731ebd3af296
+      USER_SERVICE_URL: http://user-service:8081
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`app.localhost`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth.entrypoints=web"
+      - "traefik.http.routers.auth.priority=100"
+      - "traefik.http.services.auth.loadbalancer.server.port=8080"
+      # /internal/verify rămâne DOAR intern (fără router dedicat)
+
+  device-service:
+    build: ./device-service
+    depends_on: [rabbitmq, devicedb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://devicedb:5432/devicedb
+      SPRING_DATASOURCE_USERNAME: device
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8082
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.devices.rule=Host(`app.localhost`) && PathPrefix(`/api/devices`)"
+      - "traefik.http.routers.devices.entrypoints=web"
+      - "traefik.http.routers.devices.priority=100"
+      - "traefik.http.routers.devices.middlewares=authforward@docker"
+      - "traefik.http.services.devices.loadbalancer.server.port=8082"
+
+  monitoring-service:
+    build: ./monitoring-service
+    depends_on: [rabbitmq, monitoringdb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://monitoringdb:5432/monitoring
+      SPRING_DATASOURCE_USERNAME: monitoring
+      SPRING_DATASOURCE_PASSWORD: monitoring
+      SERVER_PORT: 8083
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      APP_INGEST_QUEUE: monitoring.ingest.1
+      APP_BIND_DIRECT: "false"
+      APP_WS_EXCHANGE: ems.ws
+      APP_OVER_LIMIT_KWH: 0.05
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.monitoring.rule=Host(`app.localhost`) && PathPrefix(`/api/consumption`)"
+      - "traefik.http.routers.monitoring.entrypoints=web"
+      - "traefik.http.routers.monitoring.priority=100"
+      - "traefik.http.routers.monitoring.middlewares=authforward@docker"
+      - "traefik.http.services.monitoring.loadbalancer.server.port=8083"
+
+  monitoring-worker-2:
+    build: ./monitoring-service
+    depends_on: [rabbitmq, monitoringdb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://monitoringdb:5432/monitoring
+      SPRING_DATASOURCE_USERNAME: monitoring
+      SPRING_DATASOURCE_PASSWORD: monitoring
+      SERVER_PORT: 18083
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      APP_INGEST_QUEUE: monitoring.ingest.2
+      APP_BIND_DIRECT: "false"
+      APP_WS_EXCHANGE: ems.ws
+      APP_OVER_LIMIT_KWH: 0.5
+    networks: [proxy]
+
+  monitoring-worker-3:
+    build: ./monitoring-service
+    depends_on: [rabbitmq, monitoringdb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://monitoringdb:5432/monitoring
+      SPRING_DATASOURCE_USERNAME: monitoring
+      SPRING_DATASOURCE_PASSWORD: monitoring
+      SERVER_PORT: 28083
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      APP_INGEST_QUEUE: monitoring.ingest.3
+      APP_BIND_DIRECT: "false"
+      APP_WS_EXCHANGE: ems.ws
+      APP_OVER_LIMIT_KWH: 0.5
+    networks: [proxy]
+
+  monitoring-worker-4:
+    build: ./monitoring-service
+    depends_on: [rabbitmq, monitoringdb]
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://monitoringdb:5432/monitoring
+      SPRING_DATASOURCE_USERNAME: monitoring
+      SPRING_DATASOURCE_PASSWORD: monitoring
+      SERVER_PORT: 38083
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      APP_INGEST_QUEUE: monitoring.ingest.4
+      APP_BIND_DIRECT: "false"
+      APP_WS_EXCHANGE: ems.ws
+      APP_OVER_LIMIT_KWH: 0.5
+    networks: [proxy]
+
+  simulator:
+    build: ./simulator
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EXCHANGE: ems.data
+      DEVICE_ID: 1          # pune aici ID-ul exact din device-service (fără prefix dacă folosești numeric)
+      INTERVAL_SECONDS: 5   # rapid pentru test
+      BASE_LOAD_KWH: 1.0
+      JITTER: 0.2
+    networks: [proxy]
+
+  simulator2:
+    build: ./simulator
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EXCHANGE: ems.data
+      DEVICE_ID: 2
+      INTERVAL_SECONDS: 5
+      BASE_LOAD_KWH: 0.20
+      JITTER: 0.05
+    networks: [proxy]
+
+  simulator3:
+    build: ./simulator
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EXCHANGE: ems.data
+      DEVICE_ID: 3
+      INTERVAL_SECONDS: 5
+      BASE_LOAD_KWH: 0.20
+      JITTER: 0.05
+    networks: [proxy]
+
+  simulator4:
+    build: ./simulator
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EXCHANGE: ems.data
+      DEVICE_ID: 4
+      INTERVAL_SECONDS: 5
+      BASE_LOAD_KWH: 0.20
+      JITTER: 0.05
+    networks: [proxy]
+
+  load-balancer:
+    build: ./load-balancer
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATA_EXCHANGE: ems.data
+      RAW_QUEUE: lb.raw
+      INGEST_PREFIX: monitoring.ingest.
+      REPLICA_COUNT: 4
+    networks: [proxy]
+
+  ws-service:
+    build: ./ws-service
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      WS_EXCHANGE: ems.ws
+      WS_QUEUE: ws.events
+      JWT_SECRET: SgNfKM69SjEaN9c3dC4sLfCPff0Uf5Mt1zj7nyj6ZD/Lj0cBdOhrTtdLUgDgBYOLstR8yueGg0IG3PGbi8jfvQ==
+      PORT: 8087
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ws.rule=Host(`app.localhost`) && PathPrefix(`/ws`)"
+      - "traefik.http.routers.ws.entrypoints=web"
+      - "traefik.http.services.ws.loadbalancer.server.port=8087"
+
+  support-service:
+    build: ./support-service
+    depends_on: [rabbitmq]
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      WS_EXCHANGE: ems.ws
+      JWT_SECRET: SgNfKM69SjEaN9c3dC4sLfCPff0Uf5Mt1zj7nyj6ZD/Lj0cBdOhrTtdLUgDgBYOLstR8yueGg0IG3PGbi8jfvQ==
+      PORT: 8088
+      OPENAI_API_KEY: 
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.support.rule=Host(`app.localhost`) && PathPrefix(`/api/support`)"
+      - "traefik.http.routers.support.entrypoints=web"
+      - "traefik.http.routers.support.priority=100"
+      - "traefik.http.routers.support.middlewares=authforward@docker"
+      - "traefik.http.services.support.loadbalancer.server.port=8088"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    networks: [proxy]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # intern (fără expunere publică)
+    # ports:
+    #   - "127.0.0.1:15672:15672"
+    #   - "127.0.0.1:5672:5672"
+
+networks:
+  proxy: {}
