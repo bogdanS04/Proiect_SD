@@ -1,0 +1,16 @@
+{
+  "name": "ws-service",
+  "version": "1.0.0",
+  "description": "WebSocket transport microservice for chat and notifications",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
+  }
+}
