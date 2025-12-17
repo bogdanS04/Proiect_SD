@@ -1,9 +1,7 @@
-„Energy Management System”
+# „Energy Management System”
 
-„Distributed Event-Driven Microservices Platform”
-„Assignment 3 – WebSockets, Chat, Load Balancing”
-
----
+**„Distributed Event-Driven Microservices Platform”**  
+**„Assignment 3 – WebSockets, Chat, Load Balancing”**
 
 ## „Overview”
 
@@ -12,200 +10,151 @@ Acest proiect implementează o „platformă distribuită de management energeti
 Sistemul simulează date de consum energetic, le procesează asincron folosind un „message broker”, agregă consumul orar și livrează „notificări în timp real” și „mesaje de chat” prin „WebSocket”.
 
 Arhitectura respectă principii cloud-native:
-
-* „each service owns its database”
-* „communication is asynchronous where possible”
-* „single API Gateway (Traefik)”
-* „JWT-based security”
-* „scalable consumers with load balancing”
-
----
+- „each service owns its database”
+- „communication is asynchronous where possible”
+- „single API Gateway (Traefik)”
+- „JWT-based security”
+- „scalable consumers with load balancing”
 
 ## „Architecture Summary”
 
 ### „Core Components”
 
-* „Traefik” – „Reverse Proxy / API Gateway”
-* „RabbitMQ” – „Message Broker (topic exchanges)”
-* „PostgreSQL” – „Database per microservice”
-* „Spring Boot” – „Core backend services”
-* „Node.js” – „WebSocket service + load balancer”
-* „React SPA” – „Frontend”
-
----
+| Component | Description |
+|---|---|
+| „Traefik” | „Reverse proxy / API Gateway” |
+| „RabbitMQ” | „Message broker (topic exchanges)” |
+| „PostgreSQL” | „Database per microservice” |
+| „Spring Boot” | „Core backend services” |
+| „Node.js” | „WebSocket + load balancer” |
+| „React SPA” | „Frontend” |
 
 ## „Services”
 
 ### „auth-service”
-
-* gestionează „login” și „register”
-* emite „JWT tokens”
-* expune endpoint intern „/internal/verify” pentru „Traefik ForwardAuth”
-* baza de date: „authdb”
-
----
+- „login / register”
+- emite „JWT”
+- endpoint intern pentru ForwardAuth: `/internal/verify`
+- DB: „authdb”
 
 ### „user-service”
-
-* gestionează „user profiles” și „roles”
-* operațiile CRUD sunt permise doar pentru „ROLE_ADMIN”
-* publică evenimente:
-
-  * „user.created”
-  * „user.deleted”
-* baza de date: „userdb”
-
----
+- „profiles / roles / admin CRUD” (doar „ROLE_ADMIN”)
+- publică: `user.created`, `user.deleted`
+- DB: „userdb”
 
 ### „device-service”
-
-* CRUD pentru „devices”
-* ștergere în cascadă („cascade delete”) la ștergerea unui utilizator
-* menține tabel de utilizatori sincronizați
-* publică:
-
-  * „device.created”
-* consumă:
-
-  * „user.created”
-  * „user.deleted”
-* baza de date: „devicedb”
-
----
+- CRUD pentru „devices”
+- „cascade delete” la ștergerea unui user
+- publică: `device.created`
+- consumă: `user.created`, `user.deleted`
+- DB: „devicedb”
 
 ### „monitoring-service”
-
-* consumă evenimente de măsurare din „RabbitMQ”
-* agregă consumul „kWh / oră (UTC)”
-* detectează „overconsumption”
-* publică notificări către „ems.ws”
-
-Endpoint REST:
-
-* „GET /api/consumption/day”
-
-Baza de date: „monitoringdb”
-
----
+- consumă evenimente de măsurare din RabbitMQ
+- agregă consumul „kWh / oră (UTC)”
+- detectează supraconsum
+- REST: `GET /api/consumption/day`
+- DB: „monitoringdb”
 
 ### „monitoring-worker-2”
-
-* al doilea consumator al fluxului de ingest
-* procesează datele în paralel
-* partajează baza de date „monitoringdb”
-
----
+- al doilea consumator pentru ingest (procesare paralelă)
+- scrie în aceeași DB: „monitoringdb”
 
 ## „Messaging & Realtime”
 
 ### „simulator”
-
-* producer Python
-* publică periodic mesaje de forma „device.<id>.reading”
-* exchange utilizat: „ems.data”
-
----
+- producer Python
+- publică: `device.<id>.reading`
+- exchange: `ems.data`
 
 ### „load-balancer”
-
-* consumă o singură coadă brută din „ems.data”
-* redistribuie mesajele „round-robin” către:
-
-  * „monitoring.ingest.1”
-  * „monitoring.ingest.2”
-
----
+- consumă o singură coadă brută (ex: `lb.raw`) din `ems.data`
+- redistribuie „round-robin” către:
+  - `monitoring.ingest.1`
+  - `monitoring.ingest.2`
 
 ### „ws-service”
-
-* gateway „WebSocket”
-* autentificare prin „JWT”
-* endpoint: „/ws?token=<JWT>”
-* distribuie evenimente în timp real către clienți
-
----
+- WebSocket gateway
+- autentificare JWT
+- endpoint: `ws://app.localhost/ws?token=<JWT>`
+- distribuie evenimente din `ems.ws` către clienți
 
 ### „support-service”
+- chatbot „rule-based” (10 reguli) + fallback AI opțional
+- REST:
+  - `POST /api/support/messages`
+  - `POST /api/support/admin/reply`
+  - `GET  /api/support/history`
+- publică evenimente chat în `ems.ws`
 
-* chatbot „rule-based” (10 reguli)
-* fallback AI opțional („OpenAI”)
+## „RabbitMQ”
 
-Endpoint-uri REST:
+### „Exchanges”
+- `ems.data` – „device readings”
+- `ems.sync` – „user/device synchronization”
+- `ems.ws` – „chat & notifications”
 
-* „/api/support/messages”
-* „/api/support/admin/reply”
-* „/api/support/history”
-
-Publică evenimente:
-
-* „chat.message” în „ems.ws”
-
----
-
-## „Message Broker (RabbitMQ)”
-
-Exchange-uri:
-
-* „ems.data” – „device readings”
-* „ems.sync” – „user/device synchronization”
-* „ems.ws” – „chat & notifications”
-
----
-
-## „WebSocket & Notifications”
-
-Endpoint WebSocket:
-„ws://app.localhost/ws?token=<JWT>”
-
-Token invalid sau expirat ⇒ „forced disconnect + logout”
-
----
-
-## „Overconsumption Logic”
-
-Prag configurabil:
-„APP_OVER_LIMIT_KWH = 0.5”
-
-Notificarea este declanșată când:
-
-* o măsurare individuală depășește pragul
-* consumul agregat pe oră depășește pragul
-
----
+### „Event Types”
+- `user.created`
+- `user.deleted`
+- `device.created`
+- `device.<id>.reading`
+- `notify.overconsumption`
+- `chat.message`
 
 ## „REST API Routing”
 
-Tot traficul trece prin „Traefik”.
+Toate request-urile trec prin „Traefik”.
 
-Regulă importantă pentru a evita ca SPA-ul să intercepteze request-urile API:
+| Path | Destination |
+|---|---|
+| `/` | Frontend SPA |
+| `/api/auth/*` | auth-service |
+| `/api/users/*` | user-service |
+| `/api/devices/*` | device-service |
+| `/api/consumption/*` | monitoring-service |
+| `/api/support/*` | support-service |
+| `/ws` | ws-service |
 
-„Host(`app.localhost`) && !PathPrefix(`\/api`)”
+Regulă Traefik (ca să nu „mănânce” SPA-ul request-urile către API):
 
----
+```yaml
+traefik.http.routers.web.rule: Host(`app.localhost`) && !PathPrefix(`/api`)
+```
 
-## „Why This Architecture”
+Notă: în Markdown NU trebuie să „escape-uiești” caracterele `/` (scrii simplu `/api`). Backslash (`\`) se folosește doar când chiar vrei să afișezi backslash sau în contexte precum regex / escaping.
 
-Această arhitectură oferă:
+## „Swagger UI”
 
-* „loose coupling”
-* „horizontal scalability”
-* „fault tolerance”
-* „real-time user experience”
+| Service | URL |
+|---|---|
+| auth-service | http://app.localhost/api/auth/swagger-ui.html |
+| user-service | http://app.localhost/api/users/swagger-ui.html |
+| device-service | http://app.localhost/api/devices/swagger-ui.html |
+| monitoring-service | http://app.localhost/api/consumption/swagger-ui.html |
 
-Este un pattern identic cu cel utilizat în sisteme moderne de tip cloud.
+## „Local Development”
 
----
+Domain: `http://app.localhost`
 
-## „Conclusion”
+Start:
 
-Proiectul demonstrează utilizarea corectă a:
+```bash
+docker compose up --build
+```
 
-* microserviciilor
-* mesajelor asincrone
-* WebSocket
-* load balancing
-* securității bazate pe „JWT”
+Simulator mai rapid:
 
----
+```bash
+INTERVAL_SECONDS=5 DEVICE_ID=7 docker compose up simulator
+```
+
+## „Quick Theory Answers (3.1)”
+
+- „Queue vs Topic”: queue = point-to-point (un consumer pe mesaj); topic = pub/sub (broadcast către subscriber-i).
+- „Point-to-Point vs Publish-Subscribe”: P2P = work queue; Pub/Sub = broadcast.
+- „MOM rol”: decuplare producători/consumatori, routing, livrare fiabilă, bufferizare.
+
+## „Contact”
 
 „This project was developed as a Distributed Systems laboratory assignment for an Energy Management Platform.”
