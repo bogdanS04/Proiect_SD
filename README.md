@@ -1,346 +1,211 @@
-Energy Management System
+„Energy Management System”
 
-Distributed Event-Driven Microservices Platform
-Assignment 3 – WebSockets, Chat, Load Balancing
+„Distributed Event-Driven Microservices Platform”
+„Assignment 3 – WebSockets, Chat, Load Balancing”
 
-Overview
+---
 
-This project implements a distributed energy management platform built using an event-driven microservice architecture.
-The system simulates energy consumption data, processes it asynchronously using a message broker, aggregates hourly usage, and delivers real-time notifications and chat messages via WebSockets.
+## „Overview”
 
-The architecture follows cloud-native principles:
+Acest proiect implementează o „platformă distribuită de management energetic”, construită folosind o „arhitectură de microservicii orientată pe evenimente (event-driven)”.
 
-each service owns its database
+Sistemul simulează date de consum energetic, le procesează asincron folosind un „message broker”, agregă consumul orar și livrează „notificări în timp real” și „mesaje de chat” prin „WebSocket”.
 
-communication is asynchronous where possible
+Arhitectura respectă principii cloud-native:
 
-a single API Gateway (Traefik)
+* „each service owns its database”
+* „communication is asynchronous where possible”
+* „single API Gateway (Traefik)”
+* „JWT-based security”
+* „scalable consumers with load balancing”
 
-JWT-based security
+---
 
-scalable consumers with load balancing
+## „Architecture Summary”
 
-Architecture Summary
-Core Components
-Component	Description
-Traefik	Reverse proxy / API Gateway
-RabbitMQ	Message broker (topic exchanges)
-PostgreSQL	Database per microservice
-Spring Boot	Core backend services
-Node.js	WebSocket + load balancer
-React SPA	Frontend
-Services
-Authentication & Users
-auth-service
+### „Core Components”
 
-Handles login & registration
+* „Traefik” – „Reverse Proxy / API Gateway”
+* „RabbitMQ” – „Message Broker (topic exchanges)”
+* „PostgreSQL” – „Database per microservice”
+* „Spring Boot” – „Core backend services”
+* „Node.js” – „WebSocket service + load balancer”
+* „React SPA” – „Frontend”
 
-Issues JWT tokens
+---
 
-Exposes /internal/verify for Traefik ForwardAuth
+## „Services”
 
-Database: authdb
+### „auth-service”
 
-user-service
+* gestionează „login” și „register”
+* emite „JWT tokens”
+* expune endpoint intern „/internal/verify” pentru „Traefik ForwardAuth”
+* baza de date: „authdb”
 
-User profiles and roles
+---
 
-Admin-only CRUD operations
+### „user-service”
 
-Publishes:
+* gestionează „user profiles” și „roles”
+* operațiile CRUD sunt permise doar pentru „ROLE_ADMIN”
+* publică evenimente:
 
-user.created
+  * „user.created”
+  * „user.deleted”
+* baza de date: „userdb”
 
-user.deleted
+---
 
-Database: userdb
+### „device-service”
 
-Devices & Monitoring
-device-service
+* CRUD pentru „devices”
+* ștergere în cascadă („cascade delete”) la ștergerea unui utilizator
+* menține tabel de utilizatori sincronizați
+* publică:
 
-CRUD for devices
+  * „device.created”
+* consumă:
 
-Cascading delete on user removal
+  * „user.created”
+  * „user.deleted”
+* baza de date: „devicedb”
 
-Maintains synchronized users table
+---
 
-Publishes:
+### „monitoring-service”
 
-device.created
+* consumă evenimente de măsurare din „RabbitMQ”
+* agregă consumul „kWh / oră (UTC)”
+* detectează „overconsumption”
+* publică notificări către „ems.ws”
 
-Consumes:
+Endpoint REST:
 
-user.created
+* „GET /api/consumption/day”
 
-user.deleted
+Baza de date: „monitoringdb”
 
-Database: devicedb
+---
 
-monitoring-service
+### „monitoring-worker-2”
 
-Consumes measurement events from RabbitMQ
+* al doilea consumator al fluxului de ingest
+* procesează datele în paralel
+* partajează baza de date „monitoringdb”
 
-Aggregates hourly consumption (UTC)
+---
 
-Detects overconsumption
+## „Messaging & Realtime”
 
-Publishes notifications to WebSocket exchange
+### „simulator”
 
-REST API:
+* producer Python
+* publică periodic mesaje de forma „device.<id>.reading”
+* exchange utilizat: „ems.data”
 
-GET /api/consumption/day
+---
 
-Database: monitoringdb
+### „load-balancer”
 
-monitoring-worker-2
+* consumă o singură coadă brută din „ems.data”
+* redistribuie mesajele „round-robin” către:
 
-Second consumer of the same ingest stream
+  * „monitoring.ingest.1”
+  * „monitoring.ingest.2”
 
-Processes data in parallel
+---
 
-Shares monitoringdb
+### „ws-service”
 
-Messaging & Realtime
-simulator
+* gateway „WebSocket”
+* autentificare prin „JWT”
+* endpoint: „/ws?token=<JWT>”
+* distribuie evenimente în timp real către clienți
 
-Python producer
+---
 
-Publishes periodic readings:
+### „support-service”
 
-device.<id>.reading
+* chatbot „rule-based” (10 reguli)
+* fallback AI opțional („OpenAI”)
 
-Exchange: ems.data
+Endpoint-uri REST:
 
-load-balancer
+* „/api/support/messages”
+* „/api/support/admin/reply”
+* „/api/support/history”
 
-Consumes a single raw queue from ems.data
+Publică evenimente:
 
-Redistributes messages round-robin to:
+* „chat.message” în „ems.ws”
 
-monitoring.ingest.1
+---
 
-monitoring.ingest.2
+## „Message Broker (RabbitMQ)”
 
-ws-service
+Exchange-uri:
 
-WebSocket gateway
+* „ems.data” – „device readings”
+* „ems.sync” – „user/device synchronization”
+* „ems.ws” – „chat & notifications”
 
-Authenticates clients using JWT
+---
 
-Subscribes to ems.ws
+## „WebSocket & Notifications”
 
-Pushes events to connected clients in real time
+Endpoint WebSocket:
+„ws://app.localhost/ws?token=<JWT>”
 
-support-service
+Token invalid sau expirat ⇒ „forced disconnect + logout”
 
-Rule-based chatbot (10 rules)
+---
 
-Optional AI fallback (OpenAI)
+## „Overconsumption Logic”
 
-REST endpoints:
+Prag configurabil:
+„APP_OVER_LIMIT_KWH = 0.5”
 
-/api/support/messages
+Notificarea este declanșată când:
 
-/api/support/admin/reply
+* o măsurare individuală depășește pragul
+* consumul agregat pe oră depășește pragul
 
-/api/support/history
+---
 
-Publishes chat messages to ems.ws
+## „REST API Routing”
 
-Message Broker (RabbitMQ)
-Exchanges
-Exchange	Type	Purpose
-ems.data	topic	Device readings
-ems.sync	topic	User/device synchronization
-ems.ws	topic	Chat & notifications
-Event Types
+Tot traficul trece prin „Traefik”.
 
-user.created
+Regulă importantă pentru a evita ca SPA-ul să intercepteze request-urile API:
 
-user.deleted
+„Host(`app.localhost`) && !PathPrefix(`\/api`)”
 
-device.created
+---
 
-device.<id>.reading
+## „Why This Architecture”
 
-notify.overconsumption
+Această arhitectură oferă:
 
-chat.message
+* „loose coupling”
+* „horizontal scalability”
+* „fault tolerance”
+* „real-time user experience”
 
-WebSocket & Notifications
+Este un pattern identic cu cel utilizat în sisteme moderne de tip cloud.
 
-WebSocket endpoint:
+---
 
-ws://app.localhost/ws?token=<JWT>
+## „Conclusion”
 
+Proiectul demonstrează utilizarea corectă a:
 
-Invalid or expired token ⇒ forced disconnect + logout
+* microserviciilor
+* mesajelor asincrone
+* WebSocket
+* load balancing
+* securității bazate pe „JWT”
 
-Real-time updates:
+---
 
-Chat messages
-
-Overconsumption alerts
-
-Overconsumption Logic
-
-Configurable threshold:
-
-APP_OVER_LIMIT_KWH=0.5
-
-
-Triggered when:
-
-Single measurement exceeds threshold
-
-Hourly aggregated consumption exceeds threshold
-
-Notification published to ems.ws
-
-REST API Routing
-
-All traffic goes through Traefik.
-
-Path	Destination
-/	Frontend SPA
-/api/auth/*	auth-service
-/api/users/*	user-service
-/api/devices/*	device-service
-/api/consumption/*	monitoring-service
-/api/support/*	support-service
-/ws	ws-service
-
-⚠️ Important Traefik rule (to avoid SPA swallowing APIs):
-
-Host(`app.localhost`) && !PathPrefix(`/api`)
-
-Swagger UI
-Service	URL
-auth-service	http://app.localhost/api/auth/swagger-ui.html
-
-user-service	http://app.localhost/api/users/swagger-ui.html
-
-device-service	http://app.localhost/api/devices/swagger-ui.html
-
-monitoring-service	http://app.localhost/api/consumption/swagger-ui.html
-Frontend (React SPA)
-
-Authenticated via JWT
-
-Displays:
-
-Daily consumption chart (24h)
-
-Live overconsumption alerts
-
-Support chat (user & admin)
-
-Admin UI visible only if:
-
-ROLE_ADMIN ∈ JWT authorities
-
-Local Development
-Domain
-http://app.localhost
-
-Start system
-docker compose up --build
-
-
-Wait until all services log:
-
-Started ...
-
-Fast simulator testing
-INTERVAL_SECONDS=5 DEVICE_ID=7 docker compose up simulator
-
-Usage Steps
-
-Open http://app.localhost
-
-Clear accessToken from browser LocalStorage
-
-Register & login
-
-Observe:
-
-Live notifications
-
-Chat messages
-
-Consumption graphs
-
-Data Consistency & Sync
-
-Each service owns its DB
-
-No shared schema
-
-Data replication via events (ems.sync)
-
-Deleting a user:
-
-Deletes devices
-
-Cascades monitoring records via FK
-
-Why This Architecture
-
-Loose coupling
-
-Horizontal scalability
-
-Fault tolerance
-
-Real-time UX
-
-Production-ready pattern
-
-This design mirrors modern cloud microservice systems.
-
-Assignment Checklist
-
-Reverse proxy (Traefik) ✔️
-
-Message broker (RabbitMQ) ✔️
-
-Producer + consumers ✔️
-
-Load balancing ✔️
-
-WebSocket real-time delivery ✔️
-
-Hourly aggregation ✔️
-
-REST + Swagger ✔️
-
-Deployment diagram ✔️
-
-README ✔️
-
-Quick Theory Answers (3.1)
-
-Queue vs Topic
-
-Queue: one consumer per message
-
-Topic: broadcast to all subscribers
-
-Point-to-Point vs Publish-Subscribe
-
-P2P: work queues
-
-Pub/Sub: event broadcast
-
-Role of MOM
-
-Decouples producers and consumers
-
-Ensures reliable delivery
-
-Enables asynchronous processing
-
-Contact
-
-This project was developed as a Distributed Systems laboratory assignment
-for an Energy Management Platform.
+„This project was developed as a Distributed Systems laboratory assignment for an Energy Management Platform.”
